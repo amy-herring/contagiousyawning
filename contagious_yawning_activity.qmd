@@ -1,0 +1,292 @@
+---
+title: "Can a Fish Make You Yawn?"
+subtitle: "A one-day case study in contingency tables and logistic regression"
+description: "Comparing yawning across stimulus conditions, before and after adjustment"
+categories: Class Activity
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Goals
+
+- Construct and interpret an $r\times c$ contingency table and within-group percentages.
+- Select and interpret a test of association between categorical variables.
+- Interpret adjusted odds ratios for categorical and quantitative predictors.
+- Change a categorical predictor's reference group to test a different comparison.
+- Distinguish an overall test from individual comparisons and unadjusted from adjusted results.
+
+## Our question
+
+Can seeing another species yawn make a person yawn? Are some kinds of animal stimuli more effective than others?
+
+Gallup and Wozny (2022) studied people recruited through Amazon Mechanical Turk. Each participant was assigned to **one of eight conditions**: a control condition, or yawning stimuli from fish, amphibians, reptiles, birds, non-primate mammals, apes, or pets (cats and dogs). The animal groups viewed twelve pairs of images, each showing a yawning and a non-yawning animal. The control group viewed open and closed building windows. Participants then reported whether they had yawned during the task.
+
+The analysis dataset contains **296 participants**, with one row per person. It already incorporates the paper's exclusions. The animals were the stimuli; the human participants supplied the outcomes.
+
+We will first compare the proportion yawning across conditions. We will then interpret a logistic regression with the same predictor set used for the paper's binary outcome: **condition, gender, age, hours of sleep the previous night, and current tiredness**. We will use yawning **yes/no**, rather than the number of yawns, throughout.
+
+### Plan for today
+
+Work with your team. Take turns coding and explaining your reasoning. This activity is designed for approximately **75 minutes**.
+
+| Time | Focus |
+|:--|:--|
+| 5 minutes | Read the study description and inspect the prepared variables |
+| 25 minutes | Part 1: contingency table, proportions, plot, and test |
+| 20 minutes | Part 2: interpret the adjusted logistic model |
+| 15 minutes | Part 3: change the reference group and test animal comparisons |
+| 10 minutes | Part 4: compare conclusions and discuss limitations |
+
+## Data and preparation
+
+The preparation below gives the variables shorter names and sets the reference categories for the data. 
+
+| Analysis variable | Meaning |
+|:--|:--|
+| `condition` | Control, Fish, Amphibians, Reptiles, Birds, Mammals, Apes, or Pets; Control is the reference |
+| `yawned` | No or Yes; Yes is the modeled outcome |
+| `yawned01` | Original binary response: 0 = no, 1 = yes |
+| `gender` | Male or Female, as coded in the supplied dataset; Male is the reference |
+| `age` | Age in years |
+| `sleep_hours` | Hours of sleep the previous night |
+| `tiredness` | Reported tiredness, from 1 = not tired at all to 10 = extremely tired |
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(tidymodels)
+library(knitr)
+
+yawns_raw <- read_csv("contagious_yawning.csv")
+
+yawns <- yawns_raw %>%
+  rename(
+    condition = Condition,
+    age = `Age (Years)`,
+    gender = `Gender (1:Male; 2: Female)`,
+    yawned01 = `Yawned (1:yes; 0: no)`,
+    yawn_frequency = `Yawn Frequency`,
+    sleep_hours = `Sleep (Hours)`,
+    tiredness = `Tiredness Scale (1-10)`
+  ) %>%
+  mutate(
+    condition = factor(
+      condition,
+      levels = c("0.Control", "1.Fish", "2.Amphib", "3.Reptile",
+                 "4.Bird", "5.Mammal", "6.Ape", "7.Pet"),
+      labels = c("Control", "Fish", "Amphibians", "Reptiles",
+                 "Birds", "Mammals", "Apes", "Pets")
+    ),
+    gender = factor(gender, levels = c(1, 2), labels = c("Male", "Female")),
+    yawned = factor(yawned01, levels = c(0, 1), labels = c("No", "Yes"))
+  )
+```
+
+The numeric and factor outcomes encode the same recorded response. `yawn_frequency` is not used to redefine that response and is not included as a predictor. The activity uses the dataset's recorded yes/no answers.
+
+## Part 1: Condition and yawning
+
+### 1. Examine the contingency table
+
+a. What does one row represent? Identify the explanatory variable and response variable. 
+
+b. Examine the **percentage yawning within each condition**. Which condition has the largest percentage? Which has the smallest? Why would comparing the numbers of yawners alone be less useful?
+
+
+```{r}
+#| label: condition-table
+
+yawn_tab <- table(yawns$condition, yawns$yawned)
+knitr::kable(addmargins(yawn_tab))
+
+yawns %>%
+  group_by(condition) %>%
+  summarize(
+    No = 100 * mean(yawned == "No"),
+    Yes = 100 * mean(yawned == "Yes")
+  ) %>%
+  ungroup() %>%
+  knitr::kable(digits = 1)
+```
+
+### 2. Show the pattern
+
+Make a stacked proportional bar chart with condition on the horizontal axis and the proportion on the vertical axis. Each bar should sum to 1. Label the axes and legend clearly.
+
+Describe the main pattern in one or two sentences. Do not make a significance claim from the plot alone.
+
+**Hint:** The course notes use `geom_bar(position = "fill")`. A bar represents participants assigned to that condition, not animals in the image set.
+
+```{r}
+#| label: condition-plot
+# Make your plot here.
+```
+
+### 3. Test for an association
+
+a. Choose a test of association for the $8\times2$ table. State the null and alternative hypotheses.
+
+b. Conduct the test. Report the test statistic, degrees of freedom (if relevant), and p-value, and state your conclusion at the 0.05 level. 
+
+c. Would a significant result establish that every animal group differs from the control? That every pair of animal groups differs? Explain.
+
+
+```{r}
+#| label: condition-test
+# Conduct the test here
+```
+
+
+## Part 2: Interpret an adjusted logistic regression
+
+The table in Part 1 does not account for differences in participant characteristics. The adjusted model below includes all eight conditions and the same four additional predictors used in the paper: gender, age, sleep, and tiredness. There are no interaction terms.
+
+For participant $i$, let $p_i$ denote the probability of reporting at least one yawn during the task. The model is
+
+$$
+\begin{aligned}
+\log\left(\frac{p_i}{1-p_i}\right)
+={}&\beta_0+\sum_{k=1}^{7}\beta_k I(\text{condition}_i=k)\\
+&+\beta_F I(\text{Female}_i)
++\beta_A\,\text{age}_i
++\beta_S\,\text{sleep hours}_i
++\beta_T\,\text{tiredness}_i.
+\end{aligned}
+$$
+
+Control and Male are the reference categories. The seven condition indicators represent the seven animal-stimulus groups. The model estimates associations conditional on the other included predictors.
+
+### Model code, in the style of the course notes
+
+The results needed for Part 2 are printed below, so you can concentrate on interpretation. Run the supplied model code before starting Part 3, where you will fit models with different reference groups. The chunk has `eval: false` to avoid duplicating the provided output in the unfinished handout; remove that option to include the refit when rendering your completed activity.
+
+```{r}
+#| label: adjusted-logistic
+#| eval: false
+yawn_fit <- logistic_reg() %>%
+  set_engine("glm") %>%
+  fit(
+    yawned ~ condition + gender + age + sleep_hours + tiredness,
+    data = yawns
+  )
+
+tidy(yawn_fit, conf.int = TRUE) %>%
+  mutate(across(where(is.numeric), ~round(.x, 3))) %>%
+  knitr::kable()
+
+tidy(yawn_fit, conf.int = TRUE, exponentiate = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(`95% CI` = sprintf("(%.3f, %.3f)", conf.low, conf.high)) %>%
+  select(term, estimate, `95% CI`, p.value) %>%
+  mutate(across(where(is.numeric), ~round(.x, 3))) %>%
+  knitr::kable()
+```
+
+### Provided adjusted results
+
+These are a teaching refit of the supplied data with the paper's predictor set. The slope estimates agree with the paper when rounded to three decimal places. The intervals below are approximate profile-likelihood intervals consistent with the course-notes `tidy()` call; refitting in R can give slightly different endpoints because of numerical interpolation. The row p-values are individual Wald tests and are **not corrected for multiple comparisons**.
+
+| Comparison or change | Log odds coefficient | Adjusted OR | 95% CI for OR | p-value |
+|:--|--:|--:|:--|--:|
+| Fish vs Control | 1.880 | 6.56 | (1.97, 23.49) | 0.003 |
+| Amphibians vs Control | 1.728 | 5.63 | (1.79, 18.91) | 0.004 |
+| Reptiles vs Control | 2.532 | 12.58 | (3.64, 48.11) | <0.001 |
+| Birds vs Control | 2.767 | 15.92 | (4.09, 73.23) | <0.001 |
+| Mammals vs Control | 1.850 | 6.36 | (1.96, 22.08) | 0.003 |
+| Apes vs Control | 2.274 | 9.72 | (3.19, 31.98) | <0.001 |
+| Pets vs Control | 2.348 | 10.47 | (3.14, 38.27) | <0.001 |
+| Female vs Male | 0.151 | 1.16 | (0.62, 2.17) | 0.637 |
+| Age: one additional year | -0.0287 | 0.9717 | (0.9434, 1.0007) | 0.055 |
+| Sleep: one additional hour | 0.093 | 1.10 | (0.86, 1.39) | 0.439 |
+| Tiredness: one additional point | 0.441 | 1.55 | (1.39, 1.76) | <0.001 |
+
+
+### 4. Understand the model
+
+a. What outcome is modeled as the event of interest? 
+
+b. How many indicator variables represent condition? Which condition has all seven indicators equal to zero?
+
+c. Explain what it means for the model's condition comparisons to be **adjusted**. Which participant characteristics are held constant?
+
+### 5. Compare the pet and control conditions
+
+a. Use your Part 1 table to calculate the **unadjusted odds ratio** for yawning, comparing Pets with Control. Show the two sets of odds and their ratio.
+
+b. Interpret the model's **adjusted odds ratio for Pets versus Control**, including its confidence interval. (Do not describe the odds ratio as a ratio of probabilities.)
+
+c. Why need the adjusted odds ratio not equal your table-based odds ratio? Explain how the questions answered by the two estimates differ.
+
+### 6. Interpret tiredness and the other predictors
+
+a. Interpret the adjusted odds ratio for a **one-point increase in tiredness**. 
+
+b. Birds have the largest estimated condition odds ratio in the table. Does that establish that bird stimuli produce more yawning than pet stimuli? Explain which comparison the printed Birds row actually makes.
+
+## Part 3: Choose a new reference group
+
+### 7. Test comparisons between animal conditions
+
+The original model compares every animal group with Control. To obtain a different comparison directly in the output, change the reference level of **condition** and refit the same model. Keep **all 296 participants**, all eight conditions, the same outcome coding, and all covariates. You are changing the reference, not selecting a two-group subset.
+
+a. Make **Pets** the reference using the supplied code. State the null and alternative hypotheses tested by the Birds coefficient in this fit. Report the adjusted odds ratio for **Birds versus Pets**, its 95% confidence interval, and its Wald p-value. What is your conclusion at 0.05?
+
+```{r}
+#| label: pets-reference
+#| eval: false
+yawns_pets_ref <- yawns %>%
+  mutate(condition = relevel(condition, ref = "Pets"))
+
+pets_ref_fit <- logistic_reg() %>%
+  set_engine("glm") %>%
+  fit(
+    yawned ~ condition + gender + age + sleep_hours + tiredness,
+    data = yawns_pets_ref
+  )
+
+tidy(pets_ref_fit, conf.int = TRUE, exponentiate = TRUE) %>%
+  filter(term == "conditionBirds") %>%
+  select(term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(across(where(is.numeric), ~round(.x, 3))) %>%
+  knitr::kable()
+```
+
+b. Now write code to make **Fish** the reference, refit the same adjusted model, and extract the **Apes versus Fish** comparison. State the hypotheses and report the odds ratio, confidence interval, p-value, and conclusion. Why could you not answer this question simply by reading the Apes row from the original Control-reference table?
+
+```{r}
+#| label: fish-reference
+# Create a copy with Fish as the reference, refit, and extract the Apes row.
+```
+
+c. In the Pets-reference fit, obtain the **Control versus Pets** odds ratio. How is it related to the Pets-versus-Control odds ratio from Part 2? Explain why reversing the reference reverses the direction of the comparison.
+
+**Multiple-comparison note:** These are planned classroom examples with individual, unadjusted p-values. Searching through many reference groups for a small p-value increases the chance of a false positive. A confirmatory analysis should specify the comparison family and an appropriate adjustment; the paper used Bonferroni corrections for its post hoc comparisons. 
+
+## Part 4: Bring the analyses together
+
+### 8. Prepare a brief group report
+
+Write **four to six sentences** that answer the study questions. Include a descriptive comparison from Part 1, the overall test conclusion, one adjusted condition comparison, the tiredness association, and the conclusion from one animal-to-animal comparison in Part 3. Identify at least one limitation.
+
+Consider these design details:
+
+- Participants came from an online worker pool, and yawning was self-reported.
+- Each condition used a particular set of images; the pet condition combined cats and dogs.
+- Current tiredness was reported **after** viewing the images and reporting yawning. Does its association establish that tiredness caused yawning?
+
+*Write your report here.*
+
+
+
+## Source
+
+Gallup, A. C., and Wozny, S. (2022). *Interspecific Contagious Yawning in Humans*. **Animals**, 12, 1908. [https://doi.org/10.3390/ani12151908](https://doi.org/10.3390/ani12151908).
+
+
